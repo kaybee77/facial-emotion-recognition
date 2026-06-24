@@ -1,0 +1,30 @@
+# Large data / model artifacts (exceed GitHub's 100 MB limit)
+# BESTCOMBINED.mat (1.2 GB, corrupt), fer2013.csv (288 MB), *.keras (~230 MB)
+*.mat
+fer2013.csv
+*.keras
+*.h5
+*.weights.h5
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Editor / OS / misc junk
+.claude/
+.vscode/
+.idea/
+MediaDeviceSalts
+MediaDeviceSalts-journal
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts
+ui_server.log
+ui_server2.log
+train.log
+snapshot_*.png

@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Facial-emotion-recognition project — Python dependencies
+#
+#   Install everything:   pip install -r requirements.txt
+#
+# Notes:
+#   - cv2 is provided by the `opencv-python` package.
+#   - keras ships inside `tensorflow` (no separate install needed).
+#   - TensorFlow on native Windows is CPU-only for >= 2.11; use WSL2 for GPU.
+#   - `torch`/`torchvision` are only needed for the alternative PyTorch
+#     pipeline (train_classifier.py). Skip them if you only use the
+#     TensorFlow/FER2013 scripts.
+# ---------------------------------------------------------------------------
+
+# Deep learning — TensorFlow/Keras pipeline
+#   (train_fer2013.py, predict_fer.py, webcam_fer.py,
+#    train_classifier_keras.py, predict.py, the FER2013 notebook)
+tensorflow>=2.12
+
+# Deep learning — alternative PyTorch pipeline (train_classifier.py)
+torch>=2.0
+torchvision>=0.15
+
+# Core scientific stack
+numpy
+pandas
+
+# Image I/O and face detection
+opencv-python          # cv2
+pillow                 # image loading for torchvision / keras.utils
+
+# ML utilities, metrics, plotting
+scikit-learn           # splits, confusion matrix, classification report
+matplotlib
+seaborn                # used by the FER2013 notebook
+
+# Exhibition web UI (app.py)
+gradio>=4.0
