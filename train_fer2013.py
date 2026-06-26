@@ -12,8 +12,17 @@ Outputs:
     training_curves.png    - accuracy/loss curves
     confusion_matrix.png   - test-set confusion matrix
 
+FER2013 is heavily imbalanced (happiness ~25% vs disgust ~1.5%). To counter this:
+    --class-weights      reweight the loss so rare classes count more
+    --loss focal         use focal loss (focuses on hard/minority examples)
+    --monitor val_macro_f1   select/checkpoint the model on macro-F1 (balance-aware)
+                             instead of plain accuracy (majority-biased)
+Macro-F1 and balanced accuracy are always reported on the test set.
+
 Usage:
-    python train_fer2013.py                       # defaults: fer2013.csv, 25 epochs
+    python train_fer2013.py                                   # baseline, 25 epochs
+    python train_fer2013.py --class-weights                   # recommended quick win
+    python train_fer2013.py --class-weights --loss focal      # + focal loss
     python train_fer2013.py --epochs 40 --batch-size 64
 """
 
@@ -27,8 +36,9 @@ import cv2
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import (
-    accuracy_score, classification_report,
+    accuracy_score, balanced_accuracy_score, f1_score, classification_report,
     confusion_matrix, ConfusionMatrixDisplay,
 )
 
@@ -36,7 +46,8 @@ import tensorflow as tf
 from tensorflow.keras import optimizers
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.callbacks import (
+    Callback, EarlyStopping, ReduceLROnPlateau, ModelCheckpoint)
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 # FER2013 emotion code -> name
@@ -76,6 +87,35 @@ def build_vgg19(num_classes):
     return Model(inputs=vgg.input, outputs=out)
 
 
+class MacroF1(Callback):
+    """Compute validation macro-F1 each epoch and log it as 'val_macro_f1'.
+
+    Plain accuracy is dominated by the majority classes, so monitoring macro-F1
+    (the unweighted mean of per-class F1) makes checkpointing / early-stopping
+    balance-aware. Must be placed FIRST in the callbacks list so the metric is
+    available to the ModelCheckpoint/EarlyStopping callbacks that follow.
+    """
+
+    def __init__(self, X_val, y_val, batch_size=32):
+        super().__init__()
+        self.X_val = X_val
+        self.y_true = y_val.argmax(1)
+        self.batch_size = batch_size
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs if logs is not None else {}
+        # Manual batched inference via __call__ instead of model.predict() —
+        # repeated predict() calls leak memory (retracing), which crashed a run
+        # at epoch 24 with "MemoryError: bad allocation".
+        preds = []
+        for i in range(0, len(self.X_val), self.batch_size):
+            batch = self.X_val[i:i + self.batch_size]
+            preds.append(np.asarray(self.model(batch, training=False)).argmax(1))
+        y_pred = np.concatenate(preds)
+        logs["val_macro_f1"] = f1_score(self.y_true, y_pred, average="macro")
+        print(f"  - val_macro_f1: {logs['val_macro_f1']:.4f}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="VGG-19 on FER2013 (70/15/15 split)")
     ap.add_argument("--csv", default="fer2013.csv")
@@ -84,6 +124,21 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default="best_model_fer.keras")
+    # ---- imbalance-correction options ----
+    ap.add_argument("--class-weights", action="store_true",
+                    help="Reweight the loss with balanced class weights")
+    ap.add_argument("--loss", choices=["ce", "focal"], default="ce",
+                    help="ce = categorical cross-entropy, focal = focal loss")
+    ap.add_argument("--focal-gamma", type=float, default=2.0,
+                    help="Focusing parameter for focal loss")
+    ap.add_argument("--monitor", choices=["val_accuracy", "val_macro_f1"],
+                    default="val_macro_f1",
+                    help="Metric used for checkpoint / early-stop / LR schedule")
+    ap.add_argument("--weight-scheme", choices=["balanced", "sqrt"], default="sqrt",
+                    help="Class-weight scaling: full 'balanced' (aggressive, can "
+                         "diverge) or softened 'sqrt' (recommended, stable)")
+    ap.add_argument("--clipnorm", type=float, default=1.0,
+                    help="Gradient-clipping norm for stability (0 disables)")
     args = ap.parse_args()
 
     if not Path(args.csv).exists():
@@ -97,32 +152,72 @@ def main():
 
     X_train, y_train, X_val, y_val, X_test, y_test = stratified_70_15_15(
         feats, y, y_int, args.seed)
+    n_total = len(feats)
     print(f"Split -> train {len(X_train)} | val {len(X_val)} | test {len(X_test)} "
-          f"({len(X_train)/len(feats):.0%}/{len(X_val)/len(feats):.0%}/{len(X_test)/len(feats):.0%})")
+          f"({len(X_train)/n_total:.0%}/{len(X_val)/n_total:.0%}/{len(X_test)/n_total:.0%})")
+    # Free the ~1 GB full-dataset array; the split copies are all we need now.
+    import gc
+    del feats
+    gc.collect()
+
+    # ---- loss: cross-entropy or focal (focal down-weights easy/majority) ----
+    if args.loss == "focal":
+        loss = tf.keras.losses.CategoricalFocalCrossentropy(gamma=args.focal_gamma)
+    else:
+        loss = "categorical_crossentropy"
+
+    # Gradient clipping stabilizes training (prevents the divergence seen with
+    # aggressive class weights on a fully fine-tuned VGG-19).
+    opt_kwargs = {"learning_rate": args.lr}
+    if args.clipnorm and args.clipnorm > 0:
+        opt_kwargs["clipnorm"] = args.clipnorm
 
     model = build_vgg19(y.shape[1])
-    model.compile(loss="categorical_crossentropy",
-                  optimizer=optimizers.Adam(learning_rate=args.lr),
+    model.compile(loss=loss,
+                  optimizer=optimizers.Adam(**opt_kwargs),
                   metrics=["accuracy"])
+
+    # ---- class weights: balanced -> rare classes (disgust) weigh more ----
+    class_weight = None
+    if args.class_weights:
+        cls = np.arange(y.shape[1])
+        weights = compute_class_weight("balanced", classes=cls, y=y_train.argmax(1))
+        if args.weight_scheme == "sqrt":
+            # Soften extreme weights (disgust ~9.4x -> ~3x) and renormalize to
+            # mean 1 so the effective learning rate stays stable.
+            weights = np.sqrt(weights)
+            weights = weights / weights.mean()
+        class_weight = dict(zip(cls.tolist(), weights.tolist()))
+        print(f"Class weights ({args.weight_scheme}):",
+              {EMOTION_NAMES.get(int(le.classes_[c]), int(c)): round(w, 2)
+               for c, w in class_weight.items()})
 
     train_datagen = ImageDataGenerator(
         rotation_range=15, width_shift_range=0.15, height_shift_range=0.15,
         shear_range=0.15, zoom_range=0.15, horizontal_flip=True)
     train_datagen.fit(X_train)
 
+    # MacroF1 must come first so the metric exists for the callbacks below.
+    mode = "max"
     callbacks = [
-        ModelCheckpoint(args.out, monitor="val_accuracy", save_best_only=True, verbose=1),
-        EarlyStopping(monitor="val_accuracy", min_delta=5e-5, patience=11,
-                      verbose=1, restore_best_weights=True),
-        ReduceLROnPlateau(monitor="val_accuracy", factor=0.5, patience=7,
-                          min_lr=1e-7, verbose=1),
+        MacroF1(X_val, y_val, batch_size=args.batch_size),
+        ModelCheckpoint(args.out, monitor=args.monitor, mode=mode,
+                        save_best_only=True, verbose=1),
+        EarlyStopping(monitor=args.monitor, mode=mode, min_delta=5e-5,
+                      patience=11, verbose=1, restore_best_weights=True),
+        ReduceLROnPlateau(monitor=args.monitor, mode=mode, factor=0.5,
+                          patience=7, min_lr=1e-7, verbose=1),
     ]
+    print(f"Loss: {args.loss} | class-weights: {bool(args.class_weights)} "
+          f"({args.weight_scheme}) | clipnorm: {args.clipnorm} | "
+          f"model-selection metric: {args.monitor}")
 
     history = model.fit(
         train_datagen.flow(X_train, y_train, batch_size=args.batch_size),
         validation_data=(X_val, y_val),
         steps_per_epoch=len(X_train) // args.batch_size,
-        epochs=args.epochs, callbacks=callbacks, verbose=2)
+        epochs=args.epochs, callbacks=callbacks, class_weight=class_weight,
+        verbose=2)
 
     with open("fer_classes.json", "w") as f:
         json.dump([EMOTION_NAMES.get(int(c), int(c)) for c in le.classes_], f)
@@ -131,8 +226,13 @@ def main():
     y_pred = model.predict(X_test, batch_size=args.batch_size).argmax(1)
     y_true = y_test.argmax(1)
     acc = accuracy_score(y_true, y_pred)
+    bal_acc = balanced_accuracy_score(y_true, y_pred)
+    macro_f1 = f1_score(y_true, y_pred, average="macro")
     names = [EMOTION_NAMES.get(int(c), int(c)) for c in le.classes_]
-    print(f"\n==== TEST accuracy: {acc:.4f} ====")
+    print(f"\n==== TEST accuracy: {acc:.4f} | balanced accuracy: {bal_acc:.4f} "
+          f"| macro-F1: {macro_f1:.4f} ====")
+    print("(balanced accuracy & macro-F1 weight every class equally — the metrics "
+          "to watch under imbalance)")
     print(confusion_matrix(y_true, y_pred))
     print(classification_report(y_true, y_pred, target_names=names, digits=4))
 
@@ -142,8 +242,10 @@ def main():
         import matplotlib.pyplot as plt
         h = history.history
         fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-        ax[0].plot(h["accuracy"], label="train"); ax[0].plot(h["val_accuracy"], label="val")
-        ax[0].set_title("Accuracy"); ax[0].legend()
+        ax[0].plot(h["accuracy"], label="train acc"); ax[0].plot(h["val_accuracy"], label="val acc")
+        if "val_macro_f1" in h:
+            ax[0].plot(h["val_macro_f1"], label="val macro-F1", linestyle="--")
+        ax[0].set_title("Accuracy / Macro-F1"); ax[0].legend()
         ax[1].plot(h["loss"], label="train"); ax[1].plot(h["val_loss"], label="val")
         ax[1].set_title("Loss"); ax[1].legend()
         fig.tight_layout(); fig.savefig("training_curves.png", dpi=150)

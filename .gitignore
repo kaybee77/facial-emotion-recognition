@@ -24,7 +24,5 @@ MediaDeviceSalts-journal
 Thumbs.db
 
 # Runtime artifacts
-ui_server.log
-ui_server2.log
-train.log
+*.log
 snapshot_*.png
