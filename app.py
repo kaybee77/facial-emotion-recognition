@@ -34,9 +34,6 @@ USE_SMILE_PRIOR = bool(os.environ.get("FER_SMILE_PRIOR"))
 CLASSES_PATH = "fer_classes.json"
 DEFAULT_CLASSES = ["anger", "disgust", "fear", "happiness",
                    "sadness", "surprise", "neutral"]
-# Friendly emoji per emotion for the exhibition vibe.
-EMOJI = {"anger": "😠", "disgust": "🤢", "fear": "😨", "happiness": "😄",
-         "sadness": "😢", "surprise": "😲", "neutral": "😐"}
 BOX_BGR = {"anger": (0, 0, 255), "disgust": (0, 128, 0), "fear": (128, 0, 128),
            "happiness": (0, 215, 255), "sadness": (255, 0, 0),
            "surprise": (0, 255, 255), "neutral": (200, 200, 200)}
@@ -96,9 +93,7 @@ def predict(image):
         if w * h > main_area:  # keep the largest face for the bar chart
             main_area, main_scores = w * h, scores
 
-    # Prettify the labels shown in the bar chart with emoji.
-    pretty = {f"{EMOJI.get(k, '')} {k}": v for k, v in main_scores.items()}
-    return rgb, pretty
+    return rgb, main_scores
 
 
 # --------------------------- UI ---------------------------
@@ -107,8 +102,8 @@ THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="violet")
 with gr.Blocks(title="Facial Emotion Recognition") as demo:
     gr.Markdown(
         """
-        # 🎭 Facial Emotion Recognition
-        ### VGG-19 deep learning model · trained on FER2013 · 7 emotions
+        # Facial Emotion Recognition
+        ### VGG-19 deep learning model trained on FER2013
         Use your **webcam** or **upload a photo**, then press **Analyze**.
         The model detects each face and predicts its emotion.
         """
@@ -117,7 +112,7 @@ with gr.Blocks(title="Facial Emotion Recognition") as demo:
         with gr.Column(scale=1):
             inp = gr.Image(sources=["webcam", "upload"], type="numpy",
                            label="Webcam / Upload", height=380)
-            btn = gr.Button("✨ Analyze Emotion", variant="primary", size="lg")
+            btn = gr.Button("Analyze Emotion", variant="primary", size="lg")
             gr.Markdown("*Tip: face the camera with good lighting for best results.*")
         with gr.Column(scale=1):
             out_img = gr.Image(label="Detected faces", height=380)
@@ -128,8 +123,7 @@ with gr.Blocks(title="Facial Emotion Recognition") as demo:
     inp.change(predict, inputs=inp, outputs=[out_img, out_lbl])
 
     gr.Markdown(
-        "<sub>Emotions: 😠 anger · 🤢 disgust · 😨 fear · 😄 happiness · "
-        "😢 sadness · 😲 surprise · 😐 neutral</sub>"
+        "<sub>Emotions: anger, disgust, fear, happiness, sadness, surprise, neutral.</sub>"
     )
 
 

@@ -8,6 +8,10 @@ images or live demos.
 The model recognizes 7 emotions: **anger, disgust, fear, happiness, sadness,
 surprise, neutral**.
 
+## Demo
+
+![Gradio app screenshot](docs/app_screenshot.png)
+
 ## Results
 
 - VGG-19 (ImageNet weights) -> GlobalAveragePooling -> Dense(7, softmax).
@@ -63,11 +67,20 @@ pip install -r requirements.txt
 > TensorFlow is CPU-only on native Windows for versions >= 2.11. Use WSL2 or a
 > Linux machine with CUDA for GPU acceleration.
 
-### Data And Model
+### Data And Model Artifacts
 
-- `fer2013.csv`: download from Kaggle FER2013 or the Facial Expression
-  Recognition Challenge and place it in the project root.
-- `model_classweights.keras`: produced by the recommended training command.
+Large files are intentionally **not committed** to this repository:
+
+- `fer2013.csv` is ~288 MB and is ignored by `.gitignore`.
+- `model_classweights.keras` is ~230 MB and is ignored by `.gitignore`.
+
+To run inference, place `model_classweights.keras` in the project root. You can
+produce it locally with the recommended training command below, or upload the
+trained model to a release/Drive/Hugging Face asset and download it into the
+root with this filename.
+
+To train from scratch, download FER2013 from Kaggle or the Facial Expression
+Recognition Challenge and place `fer2013.csv` in the project root.
 
 ## Usage
 
@@ -114,6 +127,14 @@ python webcam_fer.py --video clip.mp4
 ```bash
 python plot_distribution.py
 ```
+
+## Limitations
+
+This is a portfolio/demo project, not a psychological assessment tool. Facial
+emotion recognition is sensitive to lighting, pose, camera quality, face crop,
+dataset bias, and expression ambiguity. It works best on clear, front-facing
+faces and should be treated as an approximate computer-vision demo rather than a
+reliable measure of a person's real emotional state.
 
 ## Tech Stack
 
