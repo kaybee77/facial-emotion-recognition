@@ -1,10 +1,10 @@
 """
 Real-time facial-emotion recognition from a webcam (or a video file).
 
-Uses the trained VGG-19 FER2013 model (best_model_fer.keras). For each frame it
-detects faces with OpenCV's Haar cascade, classifies each face's emotion, and
-draws a bounding box + label + confidence. Preprocessing matches training
-exactly (grayscale -> 48x48 -> 3 channels -> /255).
+Uses the trained VGG-19 FER2013 model (model_classweights.keras when available).
+For each frame it detects faces with MediaPipe when available, falls back to
+OpenCV Haar, classifies each face's emotion, and draws a bounding box + label +
+confidence.
 
 Controls:
     q or Esc  - quit
@@ -26,7 +26,10 @@ import numpy as np
 import cv2
 from tensorflow import keras
 
-IMG_SIZE = 48
+import face_detect
+import fer_preprocess
+
+DEFAULT_MODEL = "model_classweights.keras"
 DEFAULT_CLASSES = ["anger", "disgust", "fear", "happiness",
                    "sadness", "surprise", "neutral"]
 # BGR colors per emotion for the boxes/labels
@@ -44,16 +47,9 @@ def load_class_names(path):
     return DEFAULT_CLASSES
 
 
-def preprocess_face(gray_roi):
-    """grayscale ROI -> (1, 48, 48, 3) float32 in [0, 1]."""
-    face = cv2.resize(gray_roi, (IMG_SIZE, IMG_SIZE)).astype("float32")
-    face = cv2.cvtColor(face, cv2.COLOR_GRAY2RGB) / 255.0
-    return np.expand_dims(face, 0)
-
-
 def main():
     ap = argparse.ArgumentParser(description="Real-time FER with the trained VGG-19 model")
-    ap.add_argument("--model", default="best_model_fer.keras")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--classes", default="fer_classes.json")
     ap.add_argument("--camera", type=int, default=0, help="Camera index")
     ap.add_argument("--video", default="", help="Run on a video file instead of a camera")
@@ -69,8 +65,7 @@ def main():
     print("Loading model ...")
     model = keras.models.load_model(args.model)
     class_names = load_class_names(args.classes)
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    print(f"Face detector: {face_detect.backend()}")
 
     source = args.video if args.video else args.camera
     cap = cv2.VideoCapture(source)
@@ -87,15 +82,28 @@ def main():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
         if frame_idx % max(1, args.every) == 0:
-            detections = cascade.detectMultiScale(
-                gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-            results = []
-            for (x, y, w, h) in detections:
-                probs = model.predict(preprocess_face(gray[y:y + h, x:x + w]),
-                                      verbose=0)[0]
-                k = int(np.argmax(probs))
-                results.append((x, y, w, h, class_names[k], float(probs[k])))
-            last_faces = results
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            detections = face_detect.detect_faces(rgb, min_size=60)
+            if detections:
+                face_crops = [
+                    fer_preprocess.crop_with_padding(gray, box)
+                    for box in detections
+                ]
+                batch = np.stack(
+                    [fer_preprocess.preprocess_face(crop) for crop in face_crops],
+                    axis=0,
+                )
+                probs_batch = np.asarray(model(batch, training=False))
+                results = []
+                for (x, y, w, h), probs, crop in zip(detections, probs_batch,
+                                                     face_crops):
+                    probs = fer_preprocess.apply_smile_prior(probs, class_names,
+                                                             crop)
+                    k = int(np.argmax(probs))
+                    results.append((x, y, w, h, class_names[k], float(probs[k])))
+                last_faces = results
+            else:
+                last_faces = []
 
         # draw (reuse last_faces on skipped frames)
         for (x, y, w, h, label, conf) in last_faces:

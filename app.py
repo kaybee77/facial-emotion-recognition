@@ -19,14 +19,19 @@ import json
 import os
 from pathlib import Path
 
-import numpy as np
 import cv2
 import gradio as gr
 from tensorflow import keras
 
-MODEL_PATH = "best_model_fer.keras"
+import face_detect
+import fer_preprocess
+
+MODEL_PATH = os.environ.get(
+    "FER_MODEL",
+    "model_classweights.keras",
+)
+USE_SMILE_PRIOR = bool(os.environ.get("FER_SMILE_PRIOR"))
 CLASSES_PATH = "fer_classes.json"
-IMG_SIZE = 48
 DEFAULT_CLASSES = ["anger", "disgust", "fear", "happiness",
                    "sadness", "surprise", "neutral"]
 # Friendly emoji per emotion for the exhibition vibe.
@@ -42,16 +47,17 @@ if not Path(MODEL_PATH).exists():
 print("Loading model ...")
 MODEL = keras.models.load_model(MODEL_PATH)
 CLASSES = json.load(open(CLASSES_PATH)) if Path(CLASSES_PATH).exists() else DEFAULT_CLASSES
-CASCADE = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+print(f"Face detector: {face_detect.backend()}")
+
+
+def _scores_from_probs(probs):
+    return {CLASSES[i]: float(probs[i]) for i in range(len(CLASSES))}
 
 
 def _classify(gray_roi):
     """grayscale ROI -> dict {emotion: prob}."""
-    face = cv2.resize(gray_roi, (IMG_SIZE, IMG_SIZE)).astype("float32")
-    face = cv2.cvtColor(face, cv2.COLOR_GRAY2RGB) / 255.0
-    probs = MODEL.predict(np.expand_dims(face, 0), verbose=0)[0]
-    return {CLASSES[i]: float(probs[i]) for i in range(len(CLASSES))}
+    probs = fer_preprocess.predict_face_probs(MODEL, gray_roi, use_tta=True)
+    return _scores_from_probs(probs)
 
 
 def predict(image):
@@ -61,17 +67,24 @@ def predict(image):
         return None, {}
     rgb = image.copy()
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    faces = CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
-                                     minSize=(60, 60))
+    min_face_size = max(40, int(min(rgb.shape[:2]) * 0.12))
+    faces = face_detect.detect_faces(
+        rgb,
+        min_size=min_face_size,
+        min_score=0.65,
+        min_rel_area=0.01,
+    )
 
     if len(faces) == 0:
-        # No face found -> classify the whole frame so the demo still responds.
-        scores = _classify(gray)
-        return rgb, scores
+        return rgb, {}
 
+    face_crops = [fer_preprocess.crop_with_padding(gray, box) for box in faces]
     main_scores, main_area = {}, -1
-    for (x, y, w, h) in faces:
-        scores = _classify(gray[y:y + h, x:x + w])
+    for (x, y, w, h), crop in zip(faces, face_crops):
+        probs = fer_preprocess.predict_face_probs(MODEL, crop, use_tta=True)
+        if USE_SMILE_PRIOR:
+            probs = fer_preprocess.apply_smile_prior(probs, CLASSES, crop)
+        scores = _scores_from_probs(probs)
         top = max(scores, key=scores.get)
         color = BOX_BGR.get(top, (0, 255, 0))
         cv2.rectangle(rgb, (x, y), (x + w, y + h), color, 3)

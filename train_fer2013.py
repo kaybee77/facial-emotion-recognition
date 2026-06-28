@@ -7,7 +7,8 @@ GlobalAveragePooling2D -> Dense(7, softmax). Inputs are 48x48 grayscale faces
 expanded to 3 channels and scaled to [0, 1].
 
 Outputs:
-    best_model_fer.keras   - best-validation model (loadable for inference)
+    model_classweights.keras / best_model_fer.keras
+                           - best-validation model (loadable for inference)
     fer_classes.json       - class label order
     training_curves.png    - accuracy/loss curves
     confusion_matrix.png   - test-set confusion matrix
@@ -123,7 +124,9 @@ def main():
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--out", default="best_model_fer.keras")
+    ap.add_argument("--out", default=None,
+                    help="Output .keras path. Defaults to model_classweights.keras "
+                         "when --class-weights is used, otherwise best_model_fer.keras")
     # ---- imbalance-correction options ----
     ap.add_argument("--class-weights", action="store_true",
                     help="Reweight the loss with balanced class weights")
@@ -140,6 +143,9 @@ def main():
     ap.add_argument("--clipnorm", type=float, default=1.0,
                     help="Gradient-clipping norm for stability (0 disables)")
     args = ap.parse_args()
+
+    if args.out is None:
+        args.out = "model_classweights.keras" if args.class_weights else "best_model_fer.keras"
 
     if not Path(args.csv).exists():
         raise SystemExit(f"CSV not found: {args.csv}")

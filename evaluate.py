@@ -8,7 +8,7 @@ test metrics when a training run was interrupted after the model was saved.
 
 Usage:
     python evaluate.py --model model_classweights.keras
-    python evaluate.py --model best_model_fer.keras --cm-out cm_baseline.png
+    python evaluate.py --model model_classweights.keras --cm-out confusion_matrix.png
 """
 
 import argparse
