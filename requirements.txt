@@ -1,0 +1,11 @@
+# Runtime dependencies for the Gradio MVP deployment.
+#
+# Training/evaluation tools such as pandas, scikit-learn, matplotlib, and
+# seaborn are intentionally left out so Hugging Face Spaces can build quickly.
+
+tensorflow==2.16.1
+numpy<2
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.14
+pillow>=10,<11
+gradio==4.44.1
