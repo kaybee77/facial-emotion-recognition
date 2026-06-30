@@ -1,3 +1,11 @@
+---
+title: Facial Emotion Recognition
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # Facial Emotion Recognition
 
 A deep-learning facial-emotion classifier trained on the **FER2013** dataset with
