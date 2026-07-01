@@ -17,6 +17,8 @@ Options (environment variables):
 
 import json
 import os
+import tempfile
+import zipfile
 from pathlib import Path
 
 import cv2
@@ -42,7 +44,41 @@ BOX_BGR = {"anger": (0, 0, 255), "disgust": (0, 128, 0), "fear": (128, 0, 128),
 if not Path(MODEL_PATH).exists():
     raise SystemExit(f"Model not found: {MODEL_PATH} (run train_fer2013.py first)")
 print("Loading model ...")
-MODEL = keras.models.load_model(MODEL_PATH)
+
+
+def _drop_none_quantization_config(value):
+    if isinstance(value, dict):
+        value.pop("quantization_config", None)
+        for child in value.values():
+            _drop_none_quantization_config(child)
+    elif isinstance(value, list):
+        for child in value:
+            _drop_none_quantization_config(child)
+
+
+def _load_model(path):
+    try:
+        return keras.models.load_model(path)
+    except Exception as exc:
+        if "quantization_config" not in str(exc):
+            raise
+
+        with tempfile.NamedTemporaryFile(suffix=".keras", delete=False) as tmp:
+            patched_path = tmp.name
+
+        with zipfile.ZipFile(path, "r") as src, zipfile.ZipFile(patched_path, "w") as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == "config.json":
+                    config = json.loads(data.decode("utf-8"))
+                    _drop_none_quantization_config(config)
+                    data = json.dumps(config).encode("utf-8")
+                dst.writestr(item, data)
+
+        return keras.models.load_model(patched_path)
+
+
+MODEL = _load_model(MODEL_PATH)
 CLASSES = json.load(open(CLASSES_PATH)) if Path(CLASSES_PATH).exists() else DEFAULT_CLASSES
 print(f"Face detector: {face_detect.backend()}")
 
@@ -129,7 +165,6 @@ with gr.Blocks(title="Facial Emotion Recognition") as demo:
 
 if __name__ == "__main__":
     demo.launch(
-        theme=THEME,
         server_name="0.0.0.0",
         server_port=int(os.environ.get("FER_PORT", 7860)),
         share=bool(os.environ.get("FER_SHARE")),
