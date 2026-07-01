@@ -3,10 +3,14 @@
 # Training/evaluation tools such as pandas, scikit-learn, matplotlib, and
 # seaborn are intentionally left out so Hugging Face Spaces can build quickly.
 
-tensorflow==2.20.0
+tensorflow==2.21.0
 numpy<2
 opencv-python-headless==4.9.0.80
-mediapipe==0.10.14
+mediapipe==0.10.35
 pillow>=10,<11
 gradio==4.44.1
+gradio_client==1.3.0
+fastapi==0.115.2
+starlette==0.40.0
+pydantic==2.9.2
 huggingface_hub<1.0
