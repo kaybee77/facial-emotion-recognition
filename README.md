@@ -22,6 +22,7 @@ surprise, neutral**.
 | `app.py` | Gradio web UI for webcam/upload emotion recognition |
 | `face_detect.py` | Shared MediaPipe face detection with OpenCV Haar fallback |
 | `fer_preprocess.py` | Face cropping, lighting normalization, and test-time augmentation |
+| `examples/` | Pregenerated diverse test photos shown in the Gradio demo |
 | `fer_classes.json` | Emotion class labels used by the model |
 | `blaze_face_short_range.tflite` | MediaPipe face detector model |
 | `model_classweights.keras` | Trained emotion-recognition model |
@@ -63,6 +64,9 @@ This runtime demo expects these files in the project root:
 - `model_classweights.keras`
 - `fer_classes.json`
 - `blaze_face_short_range.tflite`
+
+The optional `examples/` folder contains pregenerated synthetic portraits for
+repeatable demo testing without using a webcam or arbitrary uploads.
 
 `fer2013.csv` is only needed for training experiments and is not required to run
 the web app.

@@ -34,6 +34,7 @@ MODEL_PATH = os.environ.get(
 )
 USE_SMILE_PRIOR = bool(os.environ.get("FER_SMILE_PRIOR"))
 CLASSES_PATH = "fer_classes.json"
+EXAMPLES_DIR = Path("examples")
 DEFAULT_CLASSES = ["anger", "disgust", "fear", "happiness",
                    "sadness", "surprise", "neutral"]
 BOX_BGR = {"anger": (0, 0, 255), "disgust": (0, 128, 0), "fear": (128, 0, 128),
@@ -132,10 +133,20 @@ def predict(image):
     return rgb, main_scores
 
 
+def _example_images():
+    if not EXAMPLES_DIR.exists():
+        return []
+    return [
+        [str(path)]
+        for path in sorted(EXAMPLES_DIR.iterdir())
+        if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+    ]
+
+
 # --------------------------- UI ---------------------------
 THEME = gr.themes.Soft(primary_hue="indigo", secondary_hue="violet")
 
-with gr.Blocks(title="Facial Emotion Recognition") as demo:
+with gr.Blocks(title="Facial Emotion Recognition", theme=THEME) as demo:
     gr.Markdown(
         """
         # Facial Emotion Recognition
@@ -153,6 +164,14 @@ with gr.Blocks(title="Facial Emotion Recognition") as demo:
         with gr.Column(scale=1):
             out_img = gr.Image(label="Detected faces", height=380)
             out_lbl = gr.Label(num_top_classes=7, label="Emotion confidence")
+
+    gr.Examples(
+        examples=_example_images(),
+        inputs=inp,
+        outputs=[out_img, out_lbl],
+        fn=predict,
+        cache_examples=False,
+    )
 
     btn.click(predict, inputs=inp, outputs=[out_img, out_lbl])
     # Also analyze automatically when a new image/snapshot arrives.
